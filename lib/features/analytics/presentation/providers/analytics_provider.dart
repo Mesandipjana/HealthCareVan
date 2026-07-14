@@ -153,6 +153,7 @@ final analyticsProvider = FutureProvider<AnalyticsData>((ref) async {
 final dashboardSummaryProvider =
     FutureProvider<Map<String, dynamic>>((ref) async {
   final units = await FirebaseDataService.getMobileUnits();
+  final visits = await FirebaseDataService.getFieldVisits();
   final referrals = await FirebaseDataService.getReferrals();
   final inventory = await FirebaseDataService.getInventoryItems();
   final alerts = await FirebaseDataService.getAlerts();
@@ -160,7 +161,17 @@ final dashboardSummaryProvider =
   final activeUnits = units.where((u) => u.status == 'active').length;
   final totalPatients =
       units.fold<int>(0, (sum, u) => sum + u.patientsServedThisMonth);
-  final totalVillages = units.fold<int>(0, (sum, u) => sum + u.villagesCovered);
+  final coveredVillages = {
+    ...visits
+        .map((visit) => visit.villageName.trim())
+        .where((v) => v.isNotEmpty),
+    ...reports
+        .map((report) => report.villageName.trim())
+        .where((v) => v.isNotEmpty),
+  };
+  final coveredStates = {
+    ...reports.map((report) => report.state.trim()).where((s) => s.isNotEmpty),
+  };
 
   return {
     'totalUnits': units.length,
@@ -169,9 +180,9 @@ final dashboardSummaryProvider =
         .where(
             (u) => DateTime.now().difference(u.lastActivityTime).inHours < 24)
         .length,
-    'villagesCovered': totalVillages,
-    'communitiesReached':
-        reports.map((report) => report.villageName).toSet().length,
+    'statesCovered': coveredStates.length,
+    'villagesCovered': coveredVillages.length,
+    'communitiesReached': coveredVillages.length,
     'patientsServed': totalPatients,
     'referralCases': referrals.length,
     'inventoryAlerts': inventory.where((i) => i.isLowStock).length,

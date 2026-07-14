@@ -181,7 +181,7 @@ class DashboardScreen extends ConsumerWidget {
         'bg': AppColors.kpiBlueBg,
         'trend': '+2 this quarter',
         'trendUp': true,
-        'sub': 'Across 7 states',
+        'sub': 'Across ${s?['statesCovered'] ?? 0} states',
       },
       {
         'label': 'Active Units',
