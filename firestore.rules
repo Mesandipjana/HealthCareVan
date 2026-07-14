@@ -1,0 +1,11 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      // POC/demo mode: keep open so demo users and seeded data can read/write
+      // every Healthcare collection without role-claim setup.
+      allow read, write: if true;
+    }
+  }
+}
