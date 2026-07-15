@@ -386,10 +386,47 @@ class FirebaseDataService {
     return _getList('mobile_units', _mobileUnitFromMap);
   }
 
-  static Future<void> saveMobileUnit(MobileUnit unit) {
+  static Future<void> saveMobileUnit(MobileUnit unit) async {
+    await _validateMobileUnit(unit);
     return _safeWrite(
       _db.collection('mobile_units').doc(unit.id).set(_mobileUnitToMap(unit)),
     );
+  }
+
+  static Future<void> _validateMobileUnit(MobileUnit unit) async {
+    final unitCode = unit.unitCode.trim().toUpperCase();
+    final unitName = unit.name.trim().toLowerCase();
+    if (!RegExp(r'^MHU-\d{3}$').hasMatch(unitCode)) {
+      throw FirebaseException(
+        plugin: 'cloud_firestore',
+        message: 'Unit code must use the format MHU-001.',
+      );
+    }
+
+    final existingUnits = await getMobileUnits();
+    final duplicateName = existingUnits.any(
+      (existing) =>
+          existing.id != unit.id &&
+          existing.name.trim().toLowerCase() == unitName,
+    );
+    if (duplicateName) {
+      throw FirebaseException(
+        plugin: 'cloud_firestore',
+        message: 'A mobile unit with this name already exists.',
+      );
+    }
+
+    final duplicateCode = existingUnits.any(
+      (existing) =>
+          existing.id != unit.id &&
+          existing.unitCode.trim().toUpperCase() == unitCode,
+    );
+    if (duplicateCode) {
+      throw FirebaseException(
+        plugin: 'cloud_firestore',
+        message: 'A mobile unit with this code already exists.',
+      );
+    }
   }
 
   static Future<List<InventoryItem>> getInventoryItems() async {

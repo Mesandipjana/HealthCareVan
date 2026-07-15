@@ -10,6 +10,8 @@ import '../../../../shared/widgets/status_badge.dart';
 import '../providers/attendance_provider.dart';
 import '../services/local_selfie_store.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../mobile_units/domain/entities/mobile_unit.dart';
+import '../../../mobile_units/presentation/providers/units_provider.dart';
 
 class AttendanceScreen extends ConsumerStatefulWidget {
   const AttendanceScreen({super.key});
@@ -69,7 +71,9 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
   Widget build(BuildContext context) {
     final attState = ref.watch(attendanceProvider);
     final user = ref.watch(currentUserProvider);
+    final units = ref.watch(unitsProvider).value ?? const <MobileUnit>[];
     final isDesktop = ResponsiveUtils.isDesktop(context);
+    final records = _visibleRecords(attState.records, user);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -119,7 +123,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                       ),
                       const SizedBox(height: 16),
                       Expanded(
-                        child: attState.records.isEmpty
+                        child: records.isEmpty
                             ? const EmptyStateWidget(
                                 icon: Icons.how_to_reg_outlined,
                                 title: 'No Attendance Records Found',
@@ -127,8 +131,8 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                                     'Your attendance logs will show up here.',
                               )
                             : isDesktop
-                                ? _buildTableView(context, attState.records)
-                                : _buildListView(context, attState.records),
+                                ? _buildTableView(context, records, units)
+                                : _buildListView(context, records, units),
                       ),
                     ],
                   ),
@@ -171,6 +175,18 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
               ),
       ),
     );
+  }
+
+  List<dynamic> _visibleRecords(List records, dynamic user) {
+    final since = DateTime.now().subtract(const Duration(days: 30));
+    final firstVisibleDay = DateTime(since.year, since.month, since.day);
+    final filtered = records.where((record) {
+      if (record.date.isBefore(firstVisibleDay)) return false;
+      if (user?.isAdmin == true || user?.isSupervisor == true) return true;
+      return record.userId == user?.id;
+    }).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+    return filtered;
   }
 
   Widget _buildAttendanceInstructions() {
@@ -361,7 +377,11 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
     );
   }
 
-  Widget _buildTableView(BuildContext context, List records) {
+  Widget _buildTableView(
+    BuildContext context,
+    List records,
+    List<MobileUnit> units,
+  ) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: SingleChildScrollView(
@@ -370,6 +390,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
           columns: const [
             DataColumn(label: Text('Date')),
             DataColumn(label: Text('Staff Member')),
+            DataColumn(label: Text('Mobile Van')),
             DataColumn(label: Text('Check In')),
             DataColumn(label: Text('Check Out')),
             DataColumn(label: Text('Working Hours')),
@@ -381,6 +402,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
               cells: [
                 DataCell(Text(AppDateUtils.formatDate(rec.date))),
                 DataCell(Text(rec.userName)),
+                DataCell(Text(_unitLabel(rec.unitId, units))),
                 DataCell(Text(isPresent && rec.checkInTime != null
                     ? AppDateUtils.formatTime(rec.checkInTime!)
                     : '-')),
@@ -399,14 +421,18 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
     );
   }
 
-  Widget _buildListView(BuildContext context, List records) {
+  Widget _buildListView(
+    BuildContext context,
+    List records,
+    List<MobileUnit> units,
+  ) {
     return ListView.builder(
       itemCount: records.length,
       itemBuilder: (context, index) {
         final rec = records[index];
         final isPresent = rec.isPresent;
         return ListTile(
-          title: Text(AppDateUtils.formatDate(rec.date),
+          title: Text('${rec.userName} • ${_unitLabel(rec.unitId, units)}',
               style:
                   GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13)),
           subtitle: Text(
@@ -420,5 +446,11 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
         );
       },
     );
+  }
+
+  String _unitLabel(String unitId, List<MobileUnit> units) {
+    final unit = units.where((unit) => unit.id == unitId).firstOrNull;
+    if (unit == null) return unitId.isEmpty ? 'Unassigned van' : unitId;
+    return '${unit.unitCode} - ${unit.name}';
   }
 }

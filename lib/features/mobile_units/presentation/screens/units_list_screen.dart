@@ -332,6 +332,7 @@ class _UnitsListScreenState extends ConsumerState<UnitsListScreen> {
         text:
             unit?.currentLongitude == null ? '' : '${unit!.currentLongitude}');
     final officers = ref.read(officersProvider).value ?? const [];
+    final existingUnits = ref.read(unitsProvider).value ?? const <MobileUnit>[];
     String? selectedOfficerId =
         officers.any((officer) => officer.id == unit?.supervisorId)
             ? unit?.supervisorId
@@ -392,8 +393,49 @@ class _UnitsListScreenState extends ConsumerState<UnitsListScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               _dialogRow([
-                                _field(nameCtrl, 'Unit name', required: true),
-                                _field(codeCtrl, 'Unit code', required: true),
+                                _field(
+                                  nameCtrl,
+                                  'Unit name',
+                                  required: true,
+                                  validator: (value) {
+                                    final name =
+                                        value?.trim().toLowerCase() ?? '';
+                                    final duplicate = existingUnits.any(
+                                      (existing) =>
+                                          existing.id != unit?.id &&
+                                          existing.name.trim().toLowerCase() ==
+                                              name,
+                                    );
+                                    return duplicate
+                                        ? 'Unit name already exists'
+                                        : null;
+                                  },
+                                ),
+                                _field(
+                                  codeCtrl,
+                                  'Unit code',
+                                  required: true,
+                                  helperText: 'Use format MHU-001',
+                                  validator: (value) {
+                                    final code =
+                                        value?.trim().toUpperCase() ?? '';
+                                    if (!RegExp(r'^MHU-\d{3}$')
+                                        .hasMatch(code)) {
+                                      return 'Use format MHU-001';
+                                    }
+                                    final duplicate = existingUnits.any(
+                                      (existing) =>
+                                          existing.id != unit?.id &&
+                                          existing.unitCode
+                                                  .trim()
+                                                  .toUpperCase() ==
+                                              code,
+                                    );
+                                    return duplicate
+                                        ? 'Unit code already exists'
+                                        : null;
+                                  },
+                                ),
                               ]),
                               _dialogRow([
                                 DropdownButtonFormField<String>(
@@ -509,7 +551,7 @@ class _UnitsListScreenState extends ConsumerState<UnitsListScreen> {
                                 id: unit?.id ??
                                     'unit_${now.millisecondsSinceEpoch}',
                                 name: nameCtrl.text.trim(),
-                                unitCode: codeCtrl.text.trim(),
+                                unitCode: codeCtrl.text.trim().toUpperCase(),
                                 status: status,
                                 teamSize: _intValue(teamSizeCtrl.text),
                                 teamMembers: teamMembers,
@@ -718,13 +760,15 @@ class _UnitsListScreenState extends ConsumerState<UnitsListScreen> {
     String label, {
     bool required = false,
     bool numeric = false,
+    String? helperText,
+    String? Function(String?)? validator,
   }) {
     return TextFormField(
       controller: controller,
       keyboardType: numeric
           ? const TextInputType.numberWithOptions(decimal: true)
           : TextInputType.text,
-      decoration: InputDecoration(labelText: label),
+      decoration: InputDecoration(labelText: label, helperText: helperText),
       validator: (value) {
         if (required && (value == null || value.trim().isEmpty)) {
           return '$label is required';
@@ -735,7 +779,7 @@ class _UnitsListScreenState extends ConsumerState<UnitsListScreen> {
             double.tryParse(value.trim()) == null) {
           return 'Enter a valid number';
         }
-        return null;
+        return validator?.call(value);
       },
     );
   }
