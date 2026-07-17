@@ -6,7 +6,9 @@ import '../../../mobile_units/domain/entities/mobile_unit.dart';
 final analyticsProvider = FutureProvider<AnalyticsData>((ref) async {
   final units = await FirebaseDataService.getMobileUnits();
   final reports = await FirebaseDataService.getServiceReports();
+  final patients = await FirebaseDataService.getPatients();
   final referrals = await FirebaseDataService.getReferrals();
+  final encounters = patients.expand((patient) => patient.encounters).toList();
 
   const months = [
     'Jan',
@@ -23,53 +25,37 @@ final analyticsProvider = FutureProvider<AnalyticsData>((ref) async {
     'Dec'
   ];
   final monthly = List.generate(12, (index) {
-    final monthReports =
-        reports.where((report) => report.campDate.month == index + 1);
-    final patients = monthReports.fold<int>(
-      0,
-      (sum, report) => sum + report.totalPopulationServed,
-    );
+    final patientCount = encounters
+        .where((encounter) => encounter.visitDate.month == index + 1)
+        .length;
     return MonthlyTrend(
       month: months[index],
-      patientsServed: patients,
+      patientsServed: patientCount,
     );
   });
 
-  final totalDiseaseSignals = reports.fold<int>(
-    0,
-    (sum, report) =>
-        sum +
-        report.hypertensionScreening +
-        report.diabetesScreening +
-        report.maternalHealthServices +
-        report.childHealthServices +
-        report.vaccinationSupport,
-  );
-  List<DiseaseData> diseases;
+  final categoryCounts = <String, int>{};
+  for (final encounter in encounters) {
+    for (final category in encounter.serviceCategories) {
+      categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
+    }
+  }
+  final totalDiseaseSignals =
+      categoryCounts.values.fold<int>(0, (sum, count) => sum + count);
+  final List<DiseaseData> diseases;
   if (totalDiseaseSignals == 0) {
     diseases = const [];
   } else {
-    DiseaseData item(String name, int count) => DiseaseData(
-          name: name,
-          count: count,
-          percentage: count / totalDiseaseSignals * 100,
-        );
-    final hypertension =
-        reports.fold<int>(0, (sum, r) => sum + r.hypertensionScreening);
-    final diabetes =
-        reports.fold<int>(0, (sum, r) => sum + r.diabetesScreening);
-    final maternal =
-        reports.fold<int>(0, (sum, r) => sum + r.maternalHealthServices);
-    final child = reports.fold<int>(0, (sum, r) => sum + r.childHealthServices);
-    final vaccination =
-        reports.fold<int>(0, (sum, r) => sum + r.vaccinationSupport);
-    diseases = [
-      item('Hypertension', hypertension),
-      item('Diabetes', diabetes),
-      item('Maternal Health', maternal),
-      item('Child Health', child),
-      item('Vaccination', vaccination),
-    ];
+    diseases = categoryCounts.entries
+        .map(
+          (entry) => DiseaseData(
+            name: entry.key,
+            count: entry.value,
+            percentage: entry.value / totalDiseaseSignals * 100,
+          ),
+        )
+        .toList()
+      ..sort((a, b) => b.count.compareTo(a.count));
   }
 
   final regionMap = <String, List<MobileUnit>>{};
@@ -158,9 +144,11 @@ final dashboardSummaryProvider =
   final inventory = await FirebaseDataService.getInventoryItems();
   final alerts = await FirebaseDataService.getAlerts();
   final reports = await FirebaseDataService.getServiceReports();
+  final patients = await FirebaseDataService.getPatients();
+  final patientEncounters =
+      patients.expand((patient) => patient.encounters).toList();
   final activeUnits = units.where((u) => u.status == 'active').length;
-  final totalPatients =
-      units.fold<int>(0, (sum, u) => sum + u.patientsServedThisMonth);
+  final totalPatients = patientEncounters.length;
   final coveredVillages = {
     ...visits
         .map((visit) => visit.villageName.trim())
@@ -168,9 +156,15 @@ final dashboardSummaryProvider =
     ...reports
         .map((report) => report.villageName.trim())
         .where((v) => v.isNotEmpty),
+    ...patientEncounters
+        .map((encounter) => encounter.villageName.trim())
+        .where((v) => v.isNotEmpty),
   };
   final coveredStates = {
     ...reports.map((report) => report.state.trim()).where((s) => s.isNotEmpty),
+    ...patientEncounters
+        .map((encounter) => encounter.state.trim())
+        .where((s) => s.isNotEmpty),
   };
 
   return {

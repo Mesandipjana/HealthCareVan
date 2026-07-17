@@ -35,7 +35,7 @@ class ShellLayout extends StatelessWidget {
     if (location.startsWith('/units')) title = 'Mobile Healthcare Units';
     if (location.startsWith('/visits')) title = 'Field Visit Logs';
     if (location.startsWith('/attendance')) title = 'Staff Attendance';
-    if (location.startsWith('/reports')) title = 'Service Reports';
+    if (location.startsWith('/reports')) title = 'Patient Records';
     if (location.startsWith('/referrals')) title = 'Referral Cases';
     if (location.startsWith('/inventory')) title = 'Stock Inventory';
     if (location.startsWith('/alerts')) title = 'Platform Alerts';

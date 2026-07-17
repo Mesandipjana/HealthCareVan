@@ -14,6 +14,7 @@ import '../../features/auth/domain/entities/app_user.dart';
 import '../../features/field_visits/domain/entities/field_visit.dart';
 import '../../features/inventory/domain/entities/inventory_item.dart';
 import '../../features/mobile_units/domain/entities/mobile_unit.dart';
+import '../../features/patients/domain/entities/patient_record.dart';
 import '../../features/referrals/domain/entities/referral.dart';
 import '../../features/service_reporting/domain/entities/service_report.dart';
 import '../constants/firebase_constants.dart';
@@ -445,6 +446,10 @@ class FirebaseDataService {
     return _getList('service_reports', _serviceReportFromMap);
   }
 
+  static Future<List<PatientRecord>> getPatients() async {
+    return _getList('patients', _patientFromMap);
+  }
+
   static Future<List<Referral>> getReferrals() async {
     return _getList('referrals', _referralFromMap);
   }
@@ -473,6 +478,44 @@ class FirebaseDataService {
           .set(_serviceReportToMap(report)),
     );
     await _updateUnitAfterReport(report);
+  }
+
+  static Future<void> savePatientEncounter({
+    required PatientRecord patient,
+    required PatientEncounter encounter,
+  }) async {
+    final patientId = _patientIdForPhone(patient.phone);
+    final docRef = _db.collection('patients').doc(patientId);
+    final existingDoc = await _withTimeout(docRef.get());
+    final now = DateTime.now();
+    final encounters = <Map<String, dynamic>>[];
+    if (existingDoc.exists) {
+      final existingEncounters =
+          existingDoc.data()?['encounters'] as List<dynamic>? ?? const [];
+      encounters.addAll(
+        existingEncounters
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item)),
+      );
+    }
+    encounters.insert(0, _patientEncounterToMap(encounter));
+    final createdAt = existingDoc.exists
+        ? (existingDoc.data()?['createdAt'] ?? Timestamp.fromDate(now))
+        : Timestamp.fromDate(now);
+
+    await _safeWrite(
+      docRef.set({
+        'name': patient.name,
+        'phone': patient.phone,
+        'age': patient.age,
+        'gender': patient.gender,
+        'address': patient.address,
+        'createdAt': createdAt,
+        'updatedAt': Timestamp.fromDate(now),
+        'encounters': encounters,
+      }, SetOptions(merge: true)),
+    );
+    await _updateUnitAfterPatientEncounter(encounter);
   }
 
   static Future<void> verifyServiceReport(String id, String verifiedBy) {
@@ -579,6 +622,17 @@ class FirebaseDataService {
     return _bestEffortWrite(
       _db.collection('mobile_units').doc(visit.unitId).set({
         'patientsServedThisMonth': FieldValue.increment(visit.patientsServed),
+        'visitsThisMonth': FieldValue.increment(1),
+        'lastActivityTime': Timestamp.fromDate(DateTime.now()),
+      }, SetOptions(merge: true)),
+    );
+  }
+
+  static Future<void> _updateUnitAfterPatientEncounter(
+      PatientEncounter encounter) {
+    return _bestEffortWrite(
+      _db.collection('mobile_units').doc(encounter.unitId).set({
+        'patientsServedThisMonth': FieldValue.increment(1),
         'visitsThisMonth': FieldValue.increment(1),
         'lastActivityTime': Timestamp.fromDate(DateTime.now()),
       }, SetOptions(merge: true)),
@@ -770,6 +824,7 @@ class FirebaseDataService {
         'officerName': visit.officerName,
         'villageName': visit.villageName,
         'district': visit.district,
+        'state': visit.state,
         'startTime': Timestamp.fromDate(visit.startTime),
         'endTime':
             visit.endTime == null ? null : Timestamp.fromDate(visit.endTime!),
@@ -792,6 +847,7 @@ class FirebaseDataService {
         officerName: data['officerName'] ?? '',
         villageName: data['villageName'] ?? '',
         district: data['district'] ?? '',
+        state: data['state'] ?? '',
         startTime: _date(data['startTime']),
         endTime: _nullableDate(data['endTime']),
         startLatitude: (data['startLatitude'] as num?)?.toDouble(),
@@ -896,6 +952,108 @@ class FirebaseDataService {
         isVerified: data['isVerified'] ?? false,
         verifiedBy: data['verifiedBy'],
       );
+
+  static String _patientIdForPhone(String phone) {
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    return digits.isEmpty
+        ? 'patient_${DateTime.now().millisecondsSinceEpoch}'
+        : digits;
+  }
+
+  static Map<String, dynamic> _patientEncounterToMap(
+          PatientEncounter encounter) =>
+      {
+        'id': encounter.id,
+        'unitId': encounter.unitId,
+        'unitName': encounter.unitName,
+        'visitId': encounter.visitId,
+        'officerId': encounter.officerId,
+        'officerName': encounter.officerName,
+        'visitDate': Timestamp.fromDate(encounter.visitDate),
+        'villageName': encounter.villageName,
+        'district': encounter.district,
+        'state': encounter.state,
+        'bloodPressure': encounter.bloodPressure,
+        'oxygenSaturation': encounter.oxygenSaturation,
+        'temperature': encounter.temperature,
+        'pulseRate': encounter.pulseRate,
+        'serviceCategories': encounter.serviceCategories,
+        'prescribedInventory': encounter.prescribedInventory
+            .map(_prescribedInventoryToMap)
+            .toList(),
+        'diagnosisSummary': encounter.diagnosisSummary,
+        'prescribedMedicines': encounter.prescribedMedicines,
+        'recommendedTests': encounter.recommendedTests,
+        'remarks': encounter.remarks,
+      };
+
+  static PatientEncounter _patientEncounterFromMap(Map<String, dynamic> data) =>
+      PatientEncounter(
+        id: data['id'] ?? '',
+        unitId: data['unitId'] ?? '',
+        unitName: data['unitName'] ?? '',
+        visitId: data['visitId'] ?? '',
+        officerId: data['officerId'] ?? '',
+        officerName: data['officerName'] ?? '',
+        visitDate: _date(data['visitDate']),
+        villageName: data['villageName'] ?? '',
+        district: data['district'] ?? '',
+        state: data['state'] ?? '',
+        bloodPressure: data['bloodPressure'] ?? '',
+        oxygenSaturation: data['oxygenSaturation'] ?? '',
+        temperature: data['temperature'] ?? '',
+        pulseRate: data['pulseRate'] ?? '',
+        serviceCategories:
+            List<String>.from(data['serviceCategories'] ?? const []),
+        prescribedInventory: (data['prescribedInventory'] as List<dynamic>? ??
+                const [])
+            .whereType<Map>()
+            .map((item) =>
+                _prescribedInventoryFromMap(Map<String, dynamic>.from(item)))
+            .toList(),
+        diagnosisSummary: data['diagnosisSummary'] ?? '',
+        prescribedMedicines: data['prescribedMedicines'] ?? '',
+        recommendedTests: data['recommendedTests'] ?? '',
+        remarks: data['remarks'] ?? '',
+      );
+
+  static Map<String, dynamic> _prescribedInventoryToMap(
+          PrescribedInventoryItem item) =>
+      {
+        'inventoryItemId': item.inventoryItemId,
+        'medicineName': item.medicineName,
+        'unit': item.unit,
+        'quantity': item.quantity,
+      };
+
+  static PrescribedInventoryItem _prescribedInventoryFromMap(
+          Map<String, dynamic> data) =>
+      PrescribedInventoryItem(
+        inventoryItemId: data['inventoryItemId'] ?? '',
+        medicineName: data['medicineName'] ?? '',
+        unit: data['unit'] ?? '',
+        quantity: data['quantity'] ?? 0,
+      );
+
+  static PatientRecord _patientFromMap(String id, Map<String, dynamic> data) {
+    final encounters = (data['encounters'] as List<dynamic>? ?? const [])
+        .whereType<Map>()
+        .map(
+            (item) => _patientEncounterFromMap(Map<String, dynamic>.from(item)))
+        .toList()
+      ..sort((a, b) => b.visitDate.compareTo(a.visitDate));
+    return PatientRecord(
+      id: id,
+      name: data['name'] ?? '',
+      phone: data['phone'] ?? '',
+      age: data['age'] ?? 0,
+      gender: data['gender'] ?? '',
+      address: data['address'] ?? '',
+      createdAt: _date(data['createdAt']),
+      updatedAt: _date(data['updatedAt']),
+      encounters: encounters,
+    );
+  }
 
   static Map<String, dynamic> _referralToMap(Referral referral) => {
         'unitId': referral.unitId,

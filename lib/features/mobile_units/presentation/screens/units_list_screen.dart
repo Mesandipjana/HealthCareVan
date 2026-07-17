@@ -6,6 +6,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/constants/location_options.dart';
 import '../../../../core/services/firebase_data_service.dart';
 import '../../../../core/utils/date_utils.dart';
 import '../../../../core/utils/responsive_utils.dart';
@@ -493,6 +494,12 @@ class _UnitsListScreenState extends ConsumerState<UnitsListScreen> {
                 .map((officer) => officer.id)
                 .firstOrNull;
     var status = unit?.status ?? AppConstants.statusActive;
+    String? selectedState =
+        LocationOptions.states.contains(unit?.state) ? unit?.state : null;
+    String? selectedDistrict =
+        LocationOptions.districtsFor(selectedState).contains(unit?.district)
+            ? unit?.district
+            : null;
 
     final savedUnit = await showDialog<MobileUnit>(
       context: context,
@@ -614,9 +621,48 @@ class _UnitsListScreenState extends ConsumerState<UnitsListScreen> {
                                 _field(vehicleCtrl, 'Vehicle number'),
                               ]),
                               _dialogRow([
-                                _field(districtCtrl, 'District',
-                                    required: true),
-                                _field(stateCtrl, 'State', required: true),
+                                DropdownButtonFormField<String>(
+                                  initialValue: selectedState,
+                                  decoration:
+                                      const InputDecoration(labelText: 'State'),
+                                  items: LocationOptions.states
+                                      .map((state) => DropdownMenuItem(
+                                            value: state,
+                                            child: Text(state),
+                                          ))
+                                      .toList(),
+                                  validator: (value) =>
+                                      value == null ? 'State required' : null,
+                                  onChanged: (value) {
+                                    setDialogState(() {
+                                      selectedState = value;
+                                      selectedDistrict = null;
+                                      stateCtrl.text = value ?? '';
+                                      districtCtrl.clear();
+                                    });
+                                  },
+                                ),
+                                DropdownButtonFormField<String>(
+                                  initialValue: selectedDistrict,
+                                  decoration: const InputDecoration(
+                                      labelText: 'District'),
+                                  items: LocationOptions
+                                          .districtsFor(selectedState)
+                                      .map((district) => DropdownMenuItem(
+                                            value: district,
+                                            child: Text(district),
+                                          ))
+                                      .toList(),
+                                  validator: (value) => value == null
+                                      ? 'District required'
+                                      : null,
+                                  onChanged: (value) {
+                                    setDialogState(() {
+                                      selectedDistrict = value;
+                                      districtCtrl.text = value ?? '';
+                                    });
+                                  },
+                                ),
                               ]),
                               _dialogRow([
                                 _field(latCtrl, 'Latitude', numeric: true),
@@ -719,8 +765,8 @@ class _UnitsListScreenState extends ConsumerState<UnitsListScreen> {
                                 status: status,
                                 teamSize: _intValue(teamSizeCtrl.text),
                                 teamMembers: teamMembers,
-                                district: districtCtrl.text.trim(),
-                                state: stateCtrl.text.trim(),
+                                district: selectedDistrict ?? '',
+                                state: selectedState ?? '',
                                 villagesCovered: unit?.villagesCovered ?? 0,
                                 lastActivityTime: unit?.lastActivityTime ?? now,
                                 currentLatitude:

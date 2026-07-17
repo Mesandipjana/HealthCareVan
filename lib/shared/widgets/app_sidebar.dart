@@ -53,9 +53,9 @@ const _navItems = [
     roles: ['admin', 'supervisor', 'officer'],
   ),
   _NavItem(
-    label: 'Service Reports',
-    icon: Icons.assignment_outlined,
-    iconSelected: Icons.assignment,
+    label: 'Patient Records',
+    icon: Icons.people_outline,
+    iconSelected: Icons.people,
     route: '/reports',
     roles: ['admin', 'coordinator', 'supervisor', 'officer'],
   ),

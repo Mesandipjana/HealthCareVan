@@ -6,6 +6,7 @@ class FieldVisit {
   final String officerName;
   final String villageName;
   final String district;
+  final String state;
   final DateTime startTime;
   final DateTime? endTime;
   final double? startLatitude;
@@ -25,6 +26,7 @@ class FieldVisit {
     required this.officerName,
     required this.villageName,
     required this.district,
+    required this.state,
     required this.startTime,
     this.endTime,
     this.startLatitude,
