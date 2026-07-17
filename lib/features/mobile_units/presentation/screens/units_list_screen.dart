@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_constants.dart';
@@ -110,17 +112,174 @@ class _UnitsListScreenState extends ConsumerState<UnitsListScreen> {
                   );
                 }
 
-                if (isDesktop) {
-                  return _buildTableView(context, ref, units, canManageUnits);
-                } else {
-                  return _buildGridView(
-                      context, ref, units, isTablet, canManageUnits);
-                }
+                return SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      isDesktop
+                          ? _buildTableView(context, ref, units, canManageUnits)
+                          : _buildGridView(
+                              context, ref, units, isTablet, canManageUnits),
+                      const SizedBox(height: 16),
+                      _buildUnitsMap(units),
+                    ],
+                  ),
+                );
               },
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildUnitsMap(List units) {
+    final mappedUnits = units
+        .where((unit) =>
+            unit.currentLatitude != null && unit.currentLongitude != null)
+        .toList();
+    if (mappedUnits.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final markers = mappedUnits.map<Marker>((unit) {
+      return Marker(
+        markerId: MarkerId(unit.id),
+        position: LatLng(unit.currentLatitude!, unit.currentLongitude!),
+        infoWindow: InfoWindow(
+          title: '${unit.unitCode} - ${unit.name}',
+          snippet: '${unit.district}, ${unit.state}',
+        ),
+      );
+    }).toSet();
+    final first = mappedUnits.first;
+
+    return Container(
+      height: 360,
+      decoration: BoxDecoration(
+        color: AppColors.cardBg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          GoogleMap(
+            initialCameraPosition: CameraPosition(
+              target: LatLng(first.currentLatitude!, first.currentLongitude!),
+              zoom: mappedUnits.length == 1 ? 12 : 5,
+            ),
+            markers: markers,
+            mapToolbarEnabled: false,
+            myLocationButtonEnabled: false,
+            zoomControlsEnabled: true,
+            onMapCreated: (controller) {
+              if (mappedUnits.length > 1) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  controller.animateCamera(
+                    CameraUpdate.newLatLngBounds(
+                      _boundsForUnits(mappedUnits),
+                      56,
+                    ),
+                  );
+                });
+              }
+            },
+          ),
+          Positioned(
+            top: 12,
+            right: 12,
+            child: Material(
+              color: AppColors.cardBg,
+              borderRadius: BorderRadius.circular(8),
+              elevation: 2,
+              child: IconButton(
+                tooltip: 'Expand map',
+                icon: const Icon(Icons.fullscreen),
+                onPressed: () => _showExpandedUnitsMap(mappedUnits, markers),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  LatLngBounds _boundsForUnits(List units) {
+    var minLat = units.first.currentLatitude as double;
+    var maxLat = units.first.currentLatitude as double;
+    var minLng = units.first.currentLongitude as double;
+    var maxLng = units.first.currentLongitude as double;
+
+    for (final unit in units.skip(1)) {
+      final lat = unit.currentLatitude as double;
+      final lng = unit.currentLongitude as double;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+    }
+
+    if (minLat == maxLat) {
+      minLat -= 0.01;
+      maxLat += 0.01;
+    }
+    if (minLng == maxLng) {
+      minLng -= 0.01;
+      maxLng += 0.01;
+    }
+
+    return LatLngBounds(
+      southwest: LatLng(minLat, minLng),
+      northeast: LatLng(maxLat, maxLng),
+    );
+  }
+
+  void _showExpandedUnitsMap(List units, Set<Marker> markers) {
+    final first = units.first;
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog.fullscreen(
+          child: Column(
+            children: [
+              AppBar(
+                title: const Text('Mobile Van Locations'),
+                leading: IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(dialogContext),
+                ),
+              ),
+              Expanded(
+                child: GoogleMap(
+                  initialCameraPosition: CameraPosition(
+                    target: LatLng(
+                      first.currentLatitude as double,
+                      first.currentLongitude as double,
+                    ),
+                    zoom: units.length == 1 ? 13 : 5,
+                  ),
+                  markers: markers,
+                  mapToolbarEnabled: true,
+                  myLocationButtonEnabled: false,
+                  zoomControlsEnabled: true,
+                  onMapCreated: (controller) {
+                    if (units.length > 1) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        controller.animateCamera(
+                          CameraUpdate.newLatLngBounds(
+                            _boundsForUnits(units),
+                            72,
+                          ),
+                        );
+                      });
+                    }
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -132,6 +291,8 @@ class _UnitsListScreenState extends ConsumerState<UnitsListScreen> {
     bool canManageUnits,
   ) {
     return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: isTablet ? 2 : 1,
         crossAxisSpacing: 16,
@@ -236,55 +397,52 @@ class _UnitsListScreenState extends ConsumerState<UnitsListScreen> {
       clipBehavior: Clip.antiAlias,
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.vertical,
-          child: DataTable(
-            columns: const [
-              DataColumn(label: Text('Code')),
-              DataColumn(label: Text('Unit Name')),
-              DataColumn(label: Text('Location')),
-              DataColumn(label: Text('Villages')),
-              DataColumn(label: Text('Patients (Mo)')),
-              DataColumn(label: Text('Last Active')),
-              DataColumn(label: Text('Status')),
-              DataColumn(label: Text('Actions')),
-            ],
-            rows: units.map<DataRow>((unit) {
-              return DataRow(
-                cells: [
-                  DataCell(Text(unit.unitCode,
-                      style: GoogleFonts.inter(
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.primary))),
-                  DataCell(Text(unit.name)),
-                  DataCell(Text(unit.location)),
-                  DataCell(Text('${unit.villagesCovered}')),
-                  DataCell(Text('${unit.patientsServedThisMonth}')),
-                  DataCell(Text(AppDateUtils.timeAgo(unit.lastActivityTime))),
-                  DataCell(StatusBadge.fromString(unit.status)),
-                  DataCell(
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (canManageUnits)
-                          IconButton(
-                            tooltip: 'Edit unit',
-                            icon: const Icon(Icons.edit_outlined, size: 16),
-                            onPressed: () =>
-                                _showUnitDialog(context, ref, unit: unit),
-                          ),
+        child: DataTable(
+          columns: const [
+            DataColumn(label: Text('Code')),
+            DataColumn(label: Text('Unit Name')),
+            DataColumn(label: Text('Location')),
+            DataColumn(label: Text('Villages')),
+            DataColumn(label: Text('Patients (Mo)')),
+            DataColumn(label: Text('Last Active')),
+            DataColumn(label: Text('Status')),
+            DataColumn(label: Text('Actions')),
+          ],
+          rows: units.map<DataRow>((unit) {
+            return DataRow(
+              cells: [
+                DataCell(Text(unit.unitCode,
+                    style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primary))),
+                DataCell(Text(unit.name)),
+                DataCell(Text(unit.location)),
+                DataCell(Text('${unit.villagesCovered}')),
+                DataCell(Text('${unit.patientsServedThisMonth}')),
+                DataCell(Text(AppDateUtils.timeAgo(unit.lastActivityTime))),
+                DataCell(StatusBadge.fromString(unit.status)),
+                DataCell(
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (canManageUnits)
                         IconButton(
-                          tooltip: 'View unit',
-                          icon: const Icon(Icons.arrow_forward, size: 16),
-                          onPressed: () => context.go('/units/${unit.id}'),
+                          tooltip: 'Edit unit',
+                          icon: const Icon(Icons.edit_outlined, size: 16),
+                          onPressed: () =>
+                              _showUnitDialog(context, ref, unit: unit),
                         ),
-                      ],
-                    ),
+                      IconButton(
+                        tooltip: 'View unit',
+                        icon: const Icon(Icons.arrow_forward, size: 16),
+                        onPressed: () => context.go('/units/${unit.id}'),
+                      ),
+                    ],
                   ),
-                ],
-              );
-            }).toList(),
-          ),
+                ),
+              ],
+            );
+          }).toList(),
         ),
       ),
     );
@@ -320,12 +478,6 @@ class _UnitsListScreenState extends ConsumerState<UnitsListScreen> {
     final teamMembersCtrl =
         TextEditingController(text: unit?.teamMembers.join(', ') ?? '');
     final teamSizeCtrl = TextEditingController(text: '${unit?.teamSize ?? 0}');
-    final villagesCtrl =
-        TextEditingController(text: '${unit?.villagesCovered ?? 0}');
-    final patientsCtrl =
-        TextEditingController(text: '${unit?.patientsServedThisMonth ?? 0}');
-    final visitsCtrl =
-        TextEditingController(text: '${unit?.visitsThisMonth ?? 0}');
     final latCtrl = TextEditingController(
         text: unit?.currentLatitude == null ? '' : '${unit!.currentLatitude}');
     final lngCtrl = TextEditingController(
@@ -470,16 +622,28 @@ class _UnitsListScreenState extends ConsumerState<UnitsListScreen> {
                                 _field(latCtrl, 'Latitude', numeric: true),
                                 _field(lngCtrl, 'Longitude', numeric: true),
                               ]),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: OutlinedButton.icon(
+                                  onPressed: () async {
+                                    final picked = await _pickLocation(
+                                      context,
+                                      latCtrl,
+                                      lngCtrl,
+                                    );
+                                    if (picked == null) return;
+                                    latCtrl.text =
+                                        picked.latitude.toStringAsFixed(6);
+                                    lngCtrl.text =
+                                        picked.longitude.toStringAsFixed(6);
+                                    setDialogState(() {});
+                                  },
+                                  icon: const Icon(Icons.map_outlined),
+                                  label: const Text('Pick location on map'),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
                               _dialogRow([
-                                _field(villagesCtrl, 'Villages covered',
-                                    numeric: true),
-                                _field(
-                                    patientsCtrl, 'Patients served this month',
-                                    numeric: true),
-                              ]),
-                              _dialogRow([
-                                _field(visitsCtrl, 'Visits this month',
-                                    numeric: true),
                                 _field(teamSizeCtrl, 'Team size',
                                     numeric: true),
                               ]),
@@ -557,15 +721,15 @@ class _UnitsListScreenState extends ConsumerState<UnitsListScreen> {
                                 teamMembers: teamMembers,
                                 district: districtCtrl.text.trim(),
                                 state: stateCtrl.text.trim(),
-                                villagesCovered: _intValue(villagesCtrl.text),
+                                villagesCovered: unit?.villagesCovered ?? 0,
                                 lastActivityTime: unit?.lastActivityTime ?? now,
                                 currentLatitude:
                                     double.tryParse(latCtrl.text.trim()),
                                 currentLongitude:
                                     double.tryParse(lngCtrl.text.trim()),
                                 patientsServedThisMonth:
-                                    _intValue(patientsCtrl.text),
-                                visitsThisMonth: _intValue(visitsCtrl.text),
+                                    unit?.patientsServedThisMonth ?? 0,
+                                visitsThisMonth: unit?.visitsThisMonth ?? 0,
                                 operationalSince: unit?.operationalSince ?? now,
                                 vehicleNumber: vehicleCtrl.text.trim(),
                                 supervisorId: selectedOfficerId ?? '',
@@ -631,9 +795,6 @@ class _UnitsListScreenState extends ConsumerState<UnitsListScreen> {
     vehicleCtrl.dispose();
     teamMembersCtrl.dispose();
     teamSizeCtrl.dispose();
-    villagesCtrl.dispose();
-    patientsCtrl.dispose();
-    visitsCtrl.dispose();
     latCtrl.dispose();
     lngCtrl.dispose();
   }
@@ -712,6 +873,211 @@ class _UnitsListScreenState extends ConsumerState<UnitsListScreen> {
         );
       },
     );
+  }
+
+  Future<LatLng?> _pickLocation(
+    BuildContext context,
+    TextEditingController latCtrl,
+    TextEditingController lngCtrl,
+  ) {
+    final initialLat = double.tryParse(latCtrl.text.trim()) ?? 22.9734;
+    final initialLng = double.tryParse(lngCtrl.text.trim()) ?? 78.6569;
+    final locationSearchCtrl = TextEditingController();
+    var selected = LatLng(initialLat, initialLng);
+    GoogleMapController? mapController;
+    var isSearching = false;
+
+    return showDialog<LatLng>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return Dialog(
+              insetPadding: const EdgeInsets.all(16),
+              child: SizedBox(
+                width: 760,
+                height: 560,
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Pick Mobile Van Location',
+                              style: GoogleFonts.inter(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Close',
+                            onPressed: () => Navigator.pop(dialogContext),
+                            icon: const Icon(Icons.close),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: locationSearchCtrl,
+                              textInputAction: TextInputAction.search,
+                              decoration: const InputDecoration(
+                                labelText: 'Search address or area',
+                                hintText: 'Example: AIIMS Delhi',
+                                prefixIcon: Icon(Icons.search),
+                              ),
+                              onSubmitted: (_) async {
+                                await _searchMapLocation(
+                                  dialogContext,
+                                  locationSearchCtrl,
+                                  mapController,
+                                  (value) {
+                                    setDialogState(() => selected = value);
+                                  },
+                                  (value) {
+                                    setDialogState(() => isSearching = value);
+                                  },
+                                );
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton.icon(
+                            onPressed: isSearching
+                                ? null
+                                : () async {
+                                    await _searchMapLocation(
+                                      dialogContext,
+                                      locationSearchCtrl,
+                                      mapController,
+                                      (value) {
+                                        setDialogState(() => selected = value);
+                                      },
+                                      (value) {
+                                        setDialogState(
+                                            () => isSearching = value);
+                                      },
+                                    );
+                                  },
+                            icon: isSearching
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.place_outlined),
+                            label: const Text('Search'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Expanded(
+                      child: GoogleMap(
+                        initialCameraPosition: CameraPosition(
+                          target: selected,
+                          zoom: 5,
+                        ),
+                        onMapCreated: (controller) {
+                          mapController = controller;
+                        },
+                        markers: {
+                          Marker(
+                            markerId: const MarkerId('selected_location'),
+                            position: selected,
+                          ),
+                        },
+                        onTap: (value) {
+                          setDialogState(() => selected = value);
+                        },
+                        myLocationButtonEnabled: false,
+                        mapToolbarEnabled: false,
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Lat ${selected.latitude.toStringAsFixed(6)}, Lng ${selected.longitude.toStringAsFixed(6)}',
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(dialogContext),
+                            child: const Text('Cancel'),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton(
+                            onPressed: () =>
+                                Navigator.pop(dialogContext, selected),
+                            child: const Text('Use Location'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _searchMapLocation(
+    BuildContext context,
+    TextEditingController searchCtrl,
+    GoogleMapController? mapController,
+    ValueChanged<LatLng> onLocationFound,
+    ValueChanged<bool> onSearchingChanged,
+  ) async {
+    final query = searchCtrl.text.trim();
+    if (query.isEmpty) return;
+    onSearchingChanged(true);
+    try {
+      final locations = await locationFromAddress(query);
+      if (locations.isEmpty) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No matching location found.')),
+          );
+        }
+        return;
+      }
+      final location = locations.first;
+      final target = LatLng(location.latitude, location.longitude);
+      onLocationFound(target);
+      await mapController?.animateCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(target: target, zoom: 15),
+        ),
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not search location: $e')),
+        );
+      }
+    } finally {
+      onSearchingChanged(false);
+    }
   }
 
   Widget _dialogRow(List<Widget> children) {
